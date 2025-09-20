@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  # Multi-architecture build service
+  so100_arm_multiarch:
+    image: so100-arm:multiarch
+    build:
+      context: .
+      dockerfile: Dockerfile.multiarch
+      platforms:
+        - linux/amd64
+        - linux/arm64/v8
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+      cache_from:
+        - so100-arm:multiarch
+    container_name: so100_multiarch
+    
+  # ARM64/Raspberry Pi 5 specific service
+  so100_arm_pi5:
+    image: so100-arm:pi5
+    build:
+      context: .
+      dockerfile: Dockerfile.multiarch
+      platforms:
+        - linux/arm64/v8
+    container_name: so100_pi5
+    privileged: true  # Required for GPIO access
+    devices:
+      - /dev/i2c-1:/dev/i2c-1  # I2C for sensors
+      - /dev/ttyUSB0:/dev/ttyUSB0  # USB serial for servos
+      - /dev/gpiomem:/dev/gpiomem  # GPIO memory access
+    volumes:
+      - /sys:/sys  # For GPIO access
+      - /dev/bus/usb:/dev/bus/usb  # USB devices
+      - ./star_tracker:/ros2_ws/src/star_tracker
+      - ./so_100_arm:/ros2_ws/src/so_100_arm
+    environment:
+      - ROS_DOMAIN_ID=0
+      - ROS_LOCALHOST_ONLY=0
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp  # Better performance on Pi
+      - ROBOT_MODE=hardware  # Use real hardware on Pi
+    network_mode: host  # Better performance for ROS2 on Pi
+    
+  # Development service (cross-platform)
+  so100_arm_dev:
+    image: so100-arm:dev-multiarch
+    build:
+      context: .
+      dockerfile: Dockerfile.multiarch
+      platforms:
+        - linux/amd64
+        - linux/arm64/v8
+    volumes:
+      - ./star_tracker:/ros2_ws/src/star_tracker:rw
+      - ./so_100_arm:/ros2_ws/src/so_100_arm:rw
+    environment:
+      - ROS_DOMAIN_ID=0
+      - DISPLAY=${DISPLAY}
+    network_mode: bridge

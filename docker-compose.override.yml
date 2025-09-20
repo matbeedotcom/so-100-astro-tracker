@@ -1,0 +1,28 @@
+# Development overrides for docker-compose
+# This file is automatically loaded by docker-compose
+# Use for local development settings that shouldn't be committed
+
+services:
+  so100-arm:
+    # Development settings
+    environment:
+      - ROS_LOG_DIR=/ros2_ws/logs
+      - RCUTILS_COLORIZED_OUTPUT=1
+      
+    # Additional volume mounts for development
+    volumes:
+      # Mount star tracker package
+      - ./star_tracker:/ros2_ws/src/star_tracker:rw
+      
+      # Persist build artifacts
+      - ros2_build:/ros2_ws/build
+      - ros2_install:/ros2_ws/install
+      - ros2_log:/ros2_ws/log
+      
+    # Override command for development
+    command: bash -c "source /entrypoint.sh && tail -f /dev/null"
+
+volumes:
+  ros2_build:
+  ros2_install:
+  ros2_log:

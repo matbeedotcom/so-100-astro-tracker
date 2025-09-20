@@ -1,0 +1,186 @@
+version: '3.8'
+
+# Docker Compose configuration for Raspberry Pi 5 deployment
+# Optimized for ARM64 architecture with hardware access
+
+services:
+  so100_arm:
+    image: so100-arm-pi5:latest
+    container_name: so100_pi5_robot
+    
+    # Required for hardware access
+    privileged: true
+    
+    # Device mappings for Raspberry Pi 5
+    devices:
+      # Serial ports for servo communication
+      - /dev/ttyUSB0:/dev/ttyUSB0
+      - /dev/ttyAMA0:/dev/ttyAMA0
+      - /dev/serial0:/dev/serial0
+      
+      # I2C interfaces for sensors (GPS, IMU)
+      - /dev/i2c-1:/dev/i2c-1
+      - /dev/i2c-2:/dev/i2c-2
+      
+      # SPI for additional sensors
+      - /dev/spidev0.0:/dev/spidev0.0
+      - /dev/spidev0.1:/dev/spidev0.1
+      
+      # GPIO access
+      - /dev/gpiomem:/dev/gpiomem
+      - /dev/mem:/dev/mem
+      
+      # Video devices for cameras
+      - /dev/video0:/dev/video0
+      - /dev/video1:/dev/video1
+    
+    volumes:
+      # System access for GPIO
+      - /sys:/sys
+      - /proc:/proc:ro
+      
+      # USB devices
+      - /dev/bus/usb:/dev/bus/usb
+      
+      # Configuration and calibration data
+      - ./config:/ros2_ws/config
+      - ./calibration:/ros2_ws/calibration
+      
+      # Persistent data storage
+      - ./data:/ros2_ws/data
+      
+      # Camera access (Pi Camera Module 3)
+      - /run/udev:/run/udev:ro
+      
+    environment:
+      # ROS2 Configuration
+      - ROS_DOMAIN_ID=0
+      - ROS_LOCALHOST_ONLY=0
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      
+      # Performance optimizations for Pi 5
+      - CYCLONEDDS_URI=file:///ros2_ws/config/cyclonedds.xml
+      
+      # Robot configuration
+      - ROBOT_MODE=hardware
+      - SERVO_PORT=/dev/ttyUSB0
+      - SERVO_BAUDRATE=1000000
+      
+      # GPS Configuration
+      - GPS_PORT=/dev/ttyUSB1
+      - GPS_BAUDRATE=9600
+      
+      # IMU Configuration (BNO055)
+      - IMU_I2C_BUS=1
+      - IMU_I2C_ADDR=0x28
+      
+      # Star Tracker Configuration
+      - USE_GPS=true
+      - USE_IMU=true
+      - GOTO_MODE=true
+      
+      # Display (if using local display)
+      - DISPLAY=:0
+      - QT_QPA_PLATFORM=xcb
+      
+    # Use host network for better performance
+    network_mode: host
+    
+    # Restart policy for production
+    restart: unless-stopped
+    
+    # Resource limits appropriate for Pi 5 (8GB model)
+    deploy:
+      resources:
+        limits:
+          cpus: '3.0'  # Leave 1 core for system
+          memory: 6G    # Leave 2GB for system
+        reservations:
+          cpus: '2.0'
+          memory: 4G
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "ros2", "node", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    
+    # Command override for production
+    command: |
+      bash -c "
+        echo 'Starting SO-100 Robot on Raspberry Pi 5'
+        echo 'ARM64 Architecture Detected'
+        
+        # Configure GPIO permissions
+        if [ -e /sys/class/gpio ]; then
+          echo 'Configuring GPIO access...'
+          chown -R ros:gpio /sys/class/gpio/export /sys/class/gpio/unexport || true
+          chmod -R g+rw /sys/class/gpio/ || true
+        fi
+        
+        # Source ROS2
+        source /opt/ros/humble/setup.bash
+        source /ros2_ws/install/setup.bash
+        
+        # Launch based on mode
+        if [ '$ROBOT_MODE' = 'hardware' ]; then
+          echo 'Launching hardware interface...'
+          ros2 launch so_100_arm hardware.launch.py
+        else
+          echo 'Launching simulation...'
+          ros2 launch so_100_arm moveit.launch.py
+        fi
+      "
+
+  # Optional: Star Tracker service
+  star_tracker:
+    image: so100-arm-pi5:latest
+    container_name: so100_star_tracker
+    privileged: true
+    
+    devices:
+      - /dev/i2c-1:/dev/i2c-1  # IMU
+      - /dev/ttyUSB1:/dev/ttyUSB1  # GPS
+      
+    volumes:
+      - ./config:/ros2_ws/config
+      - ./data/tracking:/ros2_ws/tracking_data
+      
+    environment:
+      - ROS_DOMAIN_ID=0
+      - ROS_LOCALHOST_ONLY=0
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - TARGET_OBJECT=moon
+      - USE_GPS=true
+      - USE_IMU=true
+      - GOTO_MODE=true
+      
+    network_mode: host
+    restart: unless-stopped
+    
+    command: ros2 launch star_tracker star_tracker_gps.launch.py
+    
+    depends_on:
+      - so100_arm
+
+  # Optional: Web interface
+  web_interface:
+    image: so100-arm-pi5:latest
+    container_name: so100_web
+    
+    ports:
+      - "8080:8080"
+      
+    environment:
+      - ROS_DOMAIN_ID=0
+      - ROS_LOCALHOST_ONLY=0
+      
+    network_mode: bridge
+    restart: unless-stopped
+    
+    command: python3 /ros2_ws/src/so_100_arm/web_interface/app.py
+    
+    depends_on:
+      - so100_arm

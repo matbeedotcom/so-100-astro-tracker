@@ -1,0 +1,95 @@
+services:
+  so100-arm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: so100-arm:humble
+    container_name: so100_arm_container
+    
+    # Network mode for ROS2 communication
+    network_mode: host
+    
+    # Privileged mode for hardware access
+    privileged: true
+    
+    # Environment variables
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - ROS_LOCALHOST_ONLY=${ROS_LOCALHOST_ONLY:-0}
+      - ROBOT_MODE=${ROBOT_MODE:-simulation}
+      
+    # Volumes for persistent data and code development
+    volumes:
+      # X11 socket for GUI applications
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      
+      # USB devices for hardware interface
+      - /dev:/dev
+      
+      # Mount source code for development
+      - ./:/ros2_ws/src/so_100_arm:rw
+      
+      # Star tracker data directory
+      - ./star_tracker_data:/ros2_ws/star_tracker_data:rw
+      
+      # Config files
+      - ./config:/ros2_ws/src/so_100_arm/config:rw
+      
+    # Device access for USB serial and camera
+    devices:
+      - /dev/ttyUSB0:/dev/ttyUSB0  # Robot arm serial interface
+      # - /dev/video0:/dev/video0    # Camera device (uncomment if using USB camera)
+      
+    # Command override based on mode
+    command: bash -c "source /entrypoint.sh && bash"
+    
+    stdin_open: true
+    tty: true
+
+  # Optional: Separate service for star tracker calculations
+  star-tracker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: so100-arm:humble
+    container_name: star_tracker_container
+    
+    network_mode: host
+    
+    environment:
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - ROS_LOCALHOST_ONLY=${ROS_LOCALHOST_ONLY:-0}
+      - TRACKER_MODE=${TRACKER_MODE:-auto}
+      - LOCATION_LAT=${LOCATION_LAT:-0.0}
+      - LOCATION_LON=${LOCATION_LON:-0.0}
+      - LOCATION_ALT=${LOCATION_ALT:-0.0}
+      
+    volumes:
+      - ./:/ros2_ws/src/so_100_arm:rw
+      - ./star_tracker_data:/ros2_ws/star_tracker_data:rw
+      
+    command: bash -c "source /entrypoint.sh && ros2 run star_tracker star_tracker_node"
+    
+    depends_on:
+      - so100-arm
+    
+    profiles:
+      - star-tracking
+
+  # Optional: Web interface for monitoring
+  web-interface:
+    image: nginx:alpine
+    container_name: so100_web_interface
+    ports:
+      - "8080:80"
+    volumes:
+      - ./web:/usr/share/nginx/html:ro
+    profiles:
+      - web
+
+# Networks (using host network mode, so this is optional)
+networks:
+  default:
+    driver: bridge

@@ -1,0 +1,172 @@
+# Multi-architecture Dockerfile for SO-100 Robot Arm
+# Supports: linux/amd64, linux/arm64/v8 (Raspberry Pi 5)
+
+# Use platform-specific base image
+FROM --platform=$TARGETPLATFORM arm64v8/ros:humble-ros-base-jammy AS arm64-base
+FROM --platform=$TARGETPLATFORM osrf/ros:humble-desktop-full AS amd64-base
+
+# Select the appropriate base image based on target architecture
+FROM ${TARGETARCH}-base
+
+# Build arguments for cross-compilation
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
+ARG TARGETARCH
+ARG TARGETVARIANT
+
+# Display build information
+RUN echo "Building for TARGETPLATFORM=$TARGETPLATFORM on BUILDPLATFORM=$BUILDPLATFORM"
+RUN echo "Target architecture: $TARGETARCH, variant: $TARGETVARIANT"
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    python3-pip \
+    python3-colcon-common-extensions \
+    python3-rosdep \
+    python3-vcstool \
+    git \
+    wget \
+    curl \
+    nano \
+    htop \
+    usbutils \
+    software-properties-common \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install ARM-specific tools for Raspberry Pi (if on ARM64)
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+    apt-get update && apt-get install -y \
+    i2c-tools \
+    python3-smbus \
+    && rm -rf /var/lib/apt/lists/* \
+    || true; \
+    fi
+
+# Install ROS2 packages - different sets based on architecture
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+    # ARM64: Install desktop packages and MoveIt2
+    apt-get update && apt-get install -y \
+    ros-humble-desktop \
+    ros-humble-moveit \
+    ros-humble-ros2-control \
+    ros-humble-ros2-controllers \
+    ros-humble-controller-manager \
+    ros-humble-joint-state-broadcaster \
+    ros-humble-joint-trajectory-controller \
+    ros-humble-position-controllers \
+    ros-humble-xacro \
+    ros-humble-robot-state-publisher \
+    ros-humble-tf2-ros \
+    && rm -rf /var/lib/apt/lists/*; \
+    else \
+    # AMD64: Install full MoveIt2 suite (already has desktop-full)
+    apt-get update && apt-get install -y \
+    ros-humble-moveit \
+    ros-humble-moveit-configs-utils \
+    ros-humble-moveit-planners \
+    ros-humble-moveit-simple-controller-manager \
+    ros-humble-moveit-ros-visualization \
+    ros-humble-moveit-setup-assistant \
+    ros-humble-ros2-control \
+    ros-humble-ros2-controllers \
+    ros-humble-controller-manager \
+    ros-humble-joint-state-broadcaster \
+    ros-humble-joint-trajectory-controller \
+    ros-humble-position-controllers \
+    ros-humble-gazebo-ros2-control \
+    ros-humble-gz-ros2-control \
+    ros-humble-xacro \
+    ros-humble-robot-state-publisher \
+    ros-humble-rviz2 \
+    ros-humble-tf2-ros \
+    && rm -rf /var/lib/apt/lists/*; \
+    fi
+
+# Install Python packages
+RUN pip3 install --no-cache-dir \
+    numpy \
+    astropy \
+    pyephem \
+    skyfield \
+    opencv-python \
+    scipy \
+    pyserial \
+    adafruit-circuitpython-bno055 \
+    || true
+
+# Install ARM64-specific Python packages
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+    pip3 install --no-cache-dir \
+    adafruit-blinka \
+    || true; \
+    fi
+
+# Note: Raspberry Pi specific packages (libraspberrypi-bin, pigpio, etc.) 
+# are not available in Docker containers and should be installed on the host
+
+# Create workspace
+WORKDIR /ros2_ws
+
+# Copy the SO-100 arm package and star_tracker
+COPY . /ros2_ws/src/so_100_arm/
+COPY star_tracker/ /ros2_ws/src/star_tracker/
+
+# Clone hardware interface package
+RUN cd /ros2_ws/src && \
+    git clone https://github.com/brukg/so_arm_100_hardware.git || true
+
+# Initialize rosdep and install dependencies
+RUN cd /ros2_ws && \
+    rosdep update && \
+    rosdep install --from-paths src --ignore-src -r -y || true
+
+# Build the workspace with architecture-specific optimizations
+RUN /bin/bash -c "source /opt/ros/humble/setup.bash && \
+    cd /ros2_ws && \
+    if [ '$TARGETARCH' = 'arm64' ]; then \
+        export CMAKE_CXX_FLAGS='-march=armv8-a+crc+crypto -mtune=cortex-a76'; \
+    fi && \
+    colcon build --symlink-install --cmake-args \
+        -DCMAKE_BUILD_TYPE=Release \
+        --packages-up-to star_tracker so_100_arm so_arm_100_hardware || \
+    colcon build --symlink-install"
+
+# Setup entrypoint
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Create non-root user
+RUN useradd -m -s /bin/bash ros && \
+    echo "ros:ros" | chpasswd && \
+    usermod -aG dialout ros && \
+    chown -R ros:ros /ros2_ws
+
+# Add user to hardware groups if they exist (for ARM64)
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+    (getent group gpio && usermod -aG gpio ros) || true; \
+    (getent group i2c && usermod -aG i2c ros) || true; \
+    (getent group spi && usermod -aG spi ros) || true; \
+    fi
+
+# Switch to non-root user
+USER ros
+
+# Source ROS2 setup in bashrc
+RUN echo "source /opt/ros/humble/setup.bash" >> /home/ros/.bashrc && \
+    echo "source /ros2_ws/install/setup.bash" >> /home/ros/.bashrc && \
+    echo "export ROS_DOMAIN_ID=0" >> /home/ros/.bashrc && \
+    echo "# Raspberry Pi 5 optimizations" >> /home/ros/.bashrc && \
+    if [ "$TARGETARCH" = "arm64" ]; then \
+        echo "export ROS_LOCALHOST_ONLY=0" >> /home/ros/.bashrc && \
+        echo "export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp" >> /home/ros/.bashrc; \
+    fi
+
+WORKDIR /ros2_ws
+
+# Add labels for multi-arch support
+LABEL org.opencontainers.image.authors="SO-100 Team"
+LABEL org.opencontainers.image.description="Multi-architecture SO-100 Robot Arm with Star Tracker"
+LABEL org.opencontainers.image.platforms="linux/amd64,linux/arm64/v8"
+
+ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
+CMD ["bash"]

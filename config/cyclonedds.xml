@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<CycloneDDS xmlns="https://cdds.io/config" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="https://cdds.io/config https://raw.githubusercontent.com/eclipse-cyclonedds/cyclonedds/master/etc/cyclonedds.xsd">
+    <Domain id="any">
+        <General>
+            <!-- Optimize for Raspberry Pi 5 ARM64 architecture -->
+            <NetworkInterfaceAddress>auto</NetworkInterfaceAddress>
+            <AllowMulticast>true</AllowMulticast>
+            <MaxMessageSize>65500B</MaxMessageSize>
+            <FragmentSize>4000B</FragmentSize>
+        </General>
+        
+        <Tracing>
+            <Verbosity>warning</Verbosity>
+            <OutputFile>stdout</OutputFile>
+        </Tracing>
+        
+        <Internal>
+            <!-- Optimize for Pi 5's Cortex-A76 cores -->
+            <MinimumSocketReceiveBufferSize>256KB</MinimumSocketReceiveBufferSize>
+            <MinimumSocketSendBufferSize>256KB</MinimumSocketSendBufferSize>
+            
+            <!-- Reduce CPU usage on embedded system -->
+            <MaxParticipants>32</MaxParticipants>
+            <MaxTopics>128</MaxTopics>
+            
+            <!-- Optimize for local network -->
+            <RediscoveryBlacklistDuration>10s</RediscoveryBlacklistDuration>
+            <HeartbeatInterval>1s</HeartbeatInterval>
+            
+            <!-- Memory optimization for 8GB Pi 5 -->
+            <DeliveryQueueMaxSamples>256</DeliveryQueueMaxSamples>
+        </Internal>
+        
+        <Discovery>
+            <!-- Faster discovery for robotics applications -->
+            <ParticipantIndex>auto</ParticipantIndex>
+            <MaxAutoParticipantIndex>100</MaxAutoParticipantIndex>
+            
+            <!-- Optimize for small local network -->
+            <Peers>
+                <Peer address="localhost"/>
+                <Peer address="192.168.1.0/24"/>
+            </Peers>
+        </Discovery>
+        
+        <TCP>
+            <!-- Enable TCP for reliable communication -->
+            <Enable>true</Enable>
+            <Port>7400</Port>
+            <NoDelay>true</NoDelay>
+        </TCP>
+        
+        <Threads>
+            <!-- Thread pool optimization for Pi 5 (4 cores) -->
+            <Pool>
+                <Size>2</Size>
+            </Pool>
+        </Threads>
+    </Domain>
+</CycloneDDS>

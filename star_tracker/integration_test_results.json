@@ -1,0 +1,43 @@
+{
+  "timestamp": "2025-09-10T19:40:57.423296",
+  "astropy_available": true,
+  "test_locations": [
+    {
+      "name": "new_york",
+      "lat": 40.7128,
+      "lon": -74.006,
+      "alt": 10.0
+    },
+    {
+      "name": "london",
+      "lat": 51.5074,
+      "lon": -0.1278,
+      "alt": 35.0
+    },
+    {
+      "name": "sydney",
+      "lat": -33.8688,
+      "lon": 151.2093,
+      "alt": 58.0
+    },
+    {
+      "name": "tokyo",
+      "lat": 35.6762,
+      "lon": 139.6503,
+      "alt": 40.0
+    },
+    {
+      "name": "north_pole",
+      "lat": 90.0,
+      "lon": 0.0,
+      "alt": 0.0
+    },
+    {
+      "name": "equator",
+      "lat": 0.0,
+      "lon": 0.0,
+      "alt": 0.0
+    }
+  ],
+  "results": {}
+}
