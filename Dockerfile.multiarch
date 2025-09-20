@@ -113,7 +113,7 @@ COPY star_tracker/ /ros2_ws/src/star_tracker/
 
 # Clone hardware interface package
 RUN cd /ros2_ws/src && \
-    git clone https://github.com/brukg/so_arm_100_hardware.git || true
+    git clone https://github.com/brukg/matbeedotcom.git || true
 
 # Initialize rosdep and install dependencies
 RUN cd /ros2_ws && \

@@ -56,9 +56,12 @@ WORKDIR /ros2_ws
 COPY . /ros2_ws/src/so_100_arm/
 COPY star_tracker/ /ros2_ws/src/star_tracker/
 
+# Copy hardware config for so_arm_100_hardware
+COPY config/hardware_config.yaml /ros2_ws/src/so_arm_100_hardware/config/hardware_config.yaml
+
 # Clone hardware interface package (if needed for physical robot)
 RUN cd /ros2_ws/src && \
-    git clone https://github.com/brukg/so_arm_100_hardware.git || true
+    git clone https://github.com/matbeedotcom/so_arm_100_hardware.git || true
 
 # Initialize rosdep and install dependencies
 RUN cd /ros2_ws && \

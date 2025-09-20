@@ -22,7 +22,7 @@ launch_robot() {
     case "${ROBOT_MODE}" in
         "hardware")
             echo "Launching hardware interface..."
-            echo "Make sure the robot is connected to ${SERIAL_PORT:-/dev/ttyUSB0}"
+            echo "Make sure the robot is connected to ${SERIAL_PORT:-/dev/ttyACM0}"
             ros2 launch so_100_arm hardware.launch.py
             ;;
         "simulation")

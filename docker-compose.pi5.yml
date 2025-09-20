@@ -45,6 +45,9 @@ services:
       # Configuration and calibration data
       - ./config:/ros2_ws/config
       - ./calibration:/ros2_ws/calibration
+
+      # Hardware config for so_arm_100_hardware
+      - ./config/hardware_config.yaml:/ros2_ws/src/so_arm_100_hardware/config/hardware_config.yaml:ro
       
       # Persistent data storage
       - ./data:/ros2_ws/data
@@ -56,7 +59,6 @@ services:
       # ROS2 Configuration
       - ROS_DOMAIN_ID=0
       - ROS_LOCALHOST_ONLY=0
-      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
       
       # Performance optimizations for Pi 5
       - CYCLONEDDS_URI=file:///ros2_ws/config/cyclonedds.xml
@@ -151,7 +153,6 @@ services:
     environment:
       - ROS_DOMAIN_ID=0
       - ROS_LOCALHOST_ONLY=0
-      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
       - TARGET_OBJECT=moon
       - USE_GPS=true
       - USE_IMU=true

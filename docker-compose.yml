@@ -36,6 +36,9 @@ services:
       
       # Config files
       - ./config:/ros2_ws/src/so_100_arm/config:rw
+
+      # Hardware config for so_arm_100_hardware
+      - ./config/hardware_config.yaml:/ros2_ws/src/so_arm_100_hardware/config/hardware_config.yaml:ro
       
     # Device access for USB serial and camera
     devices:

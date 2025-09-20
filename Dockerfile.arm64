@@ -36,6 +36,7 @@ RUN apt-get update && apt-get install -y \
     ros-humble-xacro \
     ros-humble-robot-state-publisher \
     ros-humble-tf2-ros \
+    ros-humble-rmw-cyclonedds-cpp \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python packages for star tracker
@@ -60,6 +61,9 @@ WORKDIR /ros2_ws
 # Copy the packages
 COPY so_100_arm /ros2_ws/src/so_100_arm
 COPY star_tracker /ros2_ws/src/star_tracker
+
+# Copy hardware config for so_arm_100_hardware
+COPY config/hardware_config.yaml /ros2_ws/src/so_arm_100_hardware/config/hardware_config.yaml
 
 # Initialize rosdep and install dependencies
 RUN /bin/bash -c "source /opt/ros/humble/setup.bash && \
