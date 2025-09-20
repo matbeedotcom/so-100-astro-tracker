@@ -81,7 +81,7 @@ RUN /bin/bash -c "source /opt/ros/humble/setup.bash && \
 
 # Build the workspace
 RUN /bin/bash -c "source /opt/ros/humble/setup.bash && \
-    colcon build"
+    colcon build --packages-select so_arm_100_hardware so_100_arm star_tracker --symlink-install"
 
 # Copy config files
 COPY config /ros2_ws/config

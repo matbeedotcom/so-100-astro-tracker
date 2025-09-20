@@ -2,7 +2,9 @@
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, LogInfo
-from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch.substitutions import LaunchConfiguration
+from launch.conditions import IfCondition, UnlessCondition
+from launch.substitutions import EqualsSubstitution
 from launch_ros.actions import Node
 import os
 
@@ -108,7 +110,7 @@ def generate_launch_description():
             'enable_pps': False
         }],
         output='screen',
-        condition=PythonExpression([LaunchConfiguration('use_gps'), ' == "true"'])
+        condition=IfCondition(EqualsSubstitution(LaunchConfiguration('use_gps'), 'true'))
     )
     
     # BNO055 IMU Interface Node (optional)
@@ -125,7 +127,7 @@ def generate_launch_description():
             'calibration_file': ''
         }],
         output='screen',
-        condition=PythonExpression([LaunchConfiguration('use_imu'), ' == "true"'])
+        condition=IfCondition(EqualsSubstitution(LaunchConfiguration('use_imu'), 'true'))
     )
     
     # Star Tracker Node with GPS integration
@@ -162,7 +164,7 @@ def generate_launch_description():
             'alignment_method': '2star'
         }],
         output='screen',
-        condition=PythonExpression([LaunchConfiguration('goto_mode'), ' == "true"'])
+        condition=IfCondition(EqualsSubstitution(LaunchConfiguration('goto_mode'), 'true'))
     )
     
     # Launch info
