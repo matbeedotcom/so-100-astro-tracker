@@ -11,7 +11,7 @@ echo "================================================"
 
 # Configuration
 PI_HOST="${PI_HOST:-raspberrypi.local}"
-PI_USER="${PI_USER:-pi}"
+PI_USER="${PI_USER:-acidhax}"
 PI_PORT="${PI_PORT:-22}"
 DEPLOY_DIR="/home/$PI_USER/so100-arm"
 
@@ -67,7 +67,14 @@ fi
 # Prepare deployment package
 echo ""
 echo "Preparing deployment package..."
-TEMP_DIR=$(mktemp -d)
+# Create temp directory (Windows Git Bash compatible)
+if command -v mktemp >/dev/null 2>&1; then
+    TEMP_DIR=$(mktemp -d)
+else
+    # Fallback for Windows Git Bash
+    TEMP_DIR="/tmp/so100_deploy_$$_$RANDOM"
+    mkdir -p "$TEMP_DIR"
+fi
 cp -r docker-compose.pi5.yml $TEMP_DIR/docker-compose.yml
 cp -r config $TEMP_DIR/
 cp -r star_tracker $TEMP_DIR/
