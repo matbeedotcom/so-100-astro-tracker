@@ -14,7 +14,7 @@ services:
     # Device mappings for Raspberry Pi 5
     devices:
       # Serial ports for servo communication
-      - /dev/ttyUSB0:/dev/ttyUSB0
+      - /dev/ttyACM0:/dev/ttyACM0
       - /dev/ttyAMA0:/dev/ttyAMA0
       - /dev/serial0:/dev/serial0
       
@@ -63,7 +63,7 @@ services:
       
       # Robot configuration
       - ROBOT_MODE=hardware
-      - SERVO_PORT=/dev/ttyUSB0
+      - SERVO_PORT=/dev/ttyACM0
       - SERVO_BAUDRATE=1000000
       
       # GPS Configuration

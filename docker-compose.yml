@@ -39,7 +39,7 @@ services:
       
     # Device access for USB serial and camera
     devices:
-      - /dev/ttyUSB0:/dev/ttyUSB0  # Robot arm serial interface
+      - /dev/ttyACM0:/dev/ttyACM0  # Robot arm serial interface
       # - /dev/video0:/dev/video0    # Camera device (uncomment if using USB camera)
       
     # Command override based on mode
