@@ -1,8 +1,11 @@
 # Dockerfile for ARM64 (Raspberry Pi 5)
 FROM arm64v8/ros:humble-ros-base-jammy
 
-# Install build tools and dependencies
-RUN apt-get update && apt-get install -y \
+# Fix GPG keys and install build tools
+RUN apt-get update --allow-insecure-repositories && \
+    apt-get install -y --allow-unauthenticated ca-certificates gnupg && \
+    apt-key adv --keyserver keyserver.ubuntu.com --recv-keys C1CF6E31E6BADE8868B172B4F42ED6FBAB17C654 && \
+    apt-get update && apt-get install -y \
     python3-pip \
     python3-colcon-common-extensions \
     python3-rosdep \
