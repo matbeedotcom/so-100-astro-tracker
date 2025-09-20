@@ -45,6 +45,7 @@ RUN apt-get update && apt-get install -y \
 # Install Python packages for star tracker
 RUN pip3 install --upgrade pip && \
     pip3 install \
+        ament-package \
         astropy \
         skyfield \
         pyephem \
@@ -56,6 +57,7 @@ RUN pip3 install --upgrade pip && \
         adafruit-circuitpython-gps \
         adafruit-circuitpython-bno055 \
         sysv_ipc \
+        python3-ament-package \
     || echo "Some packages may not be available for ARM64"
 
 # Create workspace
