@@ -128,9 +128,11 @@ services:
         # Source ROS2
         source /opt/ros/humble/setup.bash
 
-        # Build packages first
+        # Clone and build hardware packages
+        cd /ros2_ws/src
+        git clone https://github.com/matbeedotcom/so_arm_100_hardware.git || true
         cd /ros2_ws
-        colcon build --packages-select so_100_arm --symlink-install
+        colcon build --packages-select so_arm_100_hardware so_100_arm --symlink-install
         source /ros2_ws/install/setup.bash
 
         # Launch based on mode
