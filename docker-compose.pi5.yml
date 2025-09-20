@@ -165,23 +165,3 @@ services:
     
     depends_on:
       - so100_arm
-
-  # Optional: Web interface
-  web_interface:
-    image: so100-arm-pi5:latest
-    container_name: so100_web
-    
-    ports:
-      - "8080:8080"
-      
-    environment:
-      - ROS_DOMAIN_ID=0
-      - ROS_LOCALHOST_ONLY=0
-      
-    network_mode: bridge
-    restart: unless-stopped
-    
-    command: python3 /ros2_ws/src/so_100_arm/web_interface/app.py
-    
-    depends_on:
-      - so100_arm

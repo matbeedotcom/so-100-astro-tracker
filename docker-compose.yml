@@ -81,16 +81,6 @@ services:
     profiles:
       - star-tracking
 
-  # Optional: Web interface for monitoring
-  web-interface:
-    image: nginx:alpine
-    container_name: so100_web_interface
-    ports:
-      - "8080:80"
-    volumes:
-      - ./web:/usr/share/nginx/html:ro
-    profiles:
-      - web
 
 # Networks (using host network mode, so this is optional)
 networks:
