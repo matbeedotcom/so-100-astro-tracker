@@ -38,17 +38,20 @@ services:
       # System access for GPIO
       - /sys:/sys
       - /proc:/proc:ro
-      
+
       # USB devices
       - /dev/bus/usb:/dev/bus/usb
-      
+
+      # Mount source code for development
+      - ./:/ros2_ws/src/so_100_arm:rw
+
       # Configuration and calibration data
       - ./config:/ros2_ws/config
       - ./calibration:/ros2_ws/calibration
 
       # Hardware config for so_arm_100_hardware
       - ./config/hardware_config.yaml:/ros2_ws/src/so_arm_100_hardware/config/hardware_config.yaml:ro
-      
+
       # Persistent data storage
       - ./data:/ros2_ws/data
       
@@ -124,8 +127,12 @@ services:
         
         # Source ROS2
         source /opt/ros/humble/setup.bash
+
+        # Build packages first
+        cd /ros2_ws
+        colcon build --packages-select so_100_arm --symlink-install
         source /ros2_ws/install/setup.bash
-        
+
         # Launch based on mode
         if [ '$ROBOT_MODE' = 'hardware' ]; then
           echo 'Launching hardware interface...'
