@@ -11,12 +11,15 @@ import struct
 import time
 
 try:
-    import adafruit_bno055
-    import board
-    import busio
-    ADAFRUIT_AVAILABLE = True
+    import smbus2 as smbus
+    SMBUS_AVAILABLE = True
 except ImportError:
-    ADAFRUIT_AVAILABLE = False
+    try:
+        import smbus
+        SMBUS_AVAILABLE = True
+    except ImportError:
+        SMBUS_AVAILABLE = False
+        print("Warning: smbus/smbus2 not available")
 
 
 class BNO055Interface(Node):
@@ -80,11 +83,28 @@ class BNO055Interface(Node):
     def init_sensor(self):
         """Initialize BNO055 sensor via I2C or serial."""
         try:
-            if ADAFRUIT_AVAILABLE and not self.serial_port:
-                # Use Adafruit library for I2C
-                i2c = busio.I2C(board.SCL, board.SDA)
-                self.sensor = adafruit_bno055.BNO055_I2C(i2c, address=self.i2c_address)
-                self.sensor.mode = adafruit_bno055.NDOF_MODE
+            if SMBUS_AVAILABLE and not self.serial_port:
+                # Use direct I2C via smbus
+                self.bus = smbus.SMBus(self.i2c_bus)
+
+                # Check chip ID
+                chip_id = self.bus.read_byte_data(self.i2c_address, 0x00)
+                if chip_id != self.CHIP_ID:
+                    self.get_logger().warn(f'Unexpected chip ID: 0x{chip_id:02x}, expected 0x{self.CHIP_ID:02x}')
+
+                # Reset the sensor
+                self.bus.write_byte_data(self.i2c_address, 0x3F, 0x20)  # SYS_TRIGGER reset
+                time.sleep(0.7)  # Wait for reset
+
+                # Set to config mode
+                self.bus.write_byte_data(self.i2c_address, 0x3D, self.OPERATION_MODE_CONFIG)
+                time.sleep(0.02)
+
+                # Set to NDOF mode (9-DOF fusion)
+                self.bus.write_byte_data(self.i2c_address, 0x3D, self.OPERATION_MODE_NDOF)
+                time.sleep(0.02)
+
+                self.get_logger().info('BNO055 initialized via I2C')
                 return True
             elif self.serial_port:
                 # Use serial interface
@@ -186,77 +206,136 @@ class BNO055Interface(Node):
     
     def read_quaternion(self):
         """Read quaternion orientation."""
-        if ADAFRUIT_AVAILABLE and hasattr(self, 'sensor'):
-            quat = self.sensor.quaternion
-            if quat:
-                return quat
+        if SMBUS_AVAILABLE and hasattr(self, 'bus'):
+            try:
+                # Read 8 bytes starting from QUATERNION_W_LSB (0x20)
+                data = self.bus.read_i2c_block_data(self.i2c_address, self.QUATERNION_W_LSB, 8)
+                # Convert to quaternion (w, x, y, z)
+                w = struct.unpack('<h', bytes(data[0:2]))[0] / 16384.0
+                x = struct.unpack('<h', bytes(data[2:4]))[0] / 16384.0
+                y = struct.unpack('<h', bytes(data[4:6]))[0] / 16384.0
+                z = struct.unpack('<h', bytes(data[6:8]))[0] / 16384.0
+                return [w, x, y, z]
+            except Exception as e:
+                self.get_logger().debug(f'Failed to read quaternion: {e}')
         return [1.0, 0.0, 0.0, 0.0]  # Identity quaternion
     
     def read_euler(self):
         """Read Euler angles (heading, roll, pitch) in radians."""
-        if ADAFRUIT_AVAILABLE and hasattr(self, 'sensor'):
-            euler = self.sensor.euler
-            if euler:
+        if SMBUS_AVAILABLE and hasattr(self, 'bus'):
+            try:
+                # Read 6 bytes starting from EULER_H_LSB (0x1A)
+                data = self.bus.read_i2c_block_data(self.i2c_address, self.EULER_H_LSB, 6)
+                # Convert to Euler angles (heading, roll, pitch) in degrees
+                heading = struct.unpack('<h', bytes(data[0:2]))[0] / 16.0
+                roll = struct.unpack('<h', bytes(data[2:4]))[0] / 16.0
+                pitch = struct.unpack('<h', bytes(data[4:6]))[0] / 16.0
                 # Convert to radians
-                return [np.radians(e) if e is not None else 0.0 for e in euler]
+                return [np.radians(heading), np.radians(roll), np.radians(pitch)]
+            except Exception as e:
+                self.get_logger().debug(f'Failed to read euler: {e}')
         return [0.0, 0.0, 0.0]
     
     def read_linear_acceleration(self):
         """Read linear acceleration (gravity compensated) in m/s^2."""
-        if ADAFRUIT_AVAILABLE and hasattr(self, 'sensor'):
-            accel = self.sensor.linear_acceleration
-            if accel:
-                return [a if a is not None else 0.0 for a in accel]
+        if SMBUS_AVAILABLE and hasattr(self, 'bus'):
+            try:
+                # Read 6 bytes starting from LINEAR_ACCEL_X_LSB (0x28)
+                data = self.bus.read_i2c_block_data(self.i2c_address, self.LINEAR_ACCEL_X_LSB, 6)
+                # Convert to m/s^2 (100 LSB = 1 m/s^2)
+                x = struct.unpack('<h', bytes(data[0:2]))[0] / 100.0
+                y = struct.unpack('<h', bytes(data[2:4]))[0] / 100.0
+                z = struct.unpack('<h', bytes(data[4:6]))[0] / 100.0
+                return [x, y, z]
+            except Exception as e:
+                self.get_logger().debug(f'Failed to read linear acceleration: {e}')
         return [0.0, 0.0, 0.0]
     
     def read_gyroscope(self):
         """Read angular velocity in rad/s."""
-        if ADAFRUIT_AVAILABLE and hasattr(self, 'sensor'):
-            gyro = self.sensor.gyro
-            if gyro:
+        if SMBUS_AVAILABLE and hasattr(self, 'bus'):
+            try:
+                # Read 6 bytes starting from GYRO_DATA_X_LSB (0x14)
+                data = self.bus.read_i2c_block_data(self.i2c_address, 0x14, 6)
+                # Convert to degrees/s (16 LSB = 1 degree/s)
+                x = struct.unpack('<h', bytes(data[0:2]))[0] / 16.0
+                y = struct.unpack('<h', bytes(data[2:4]))[0] / 16.0
+                z = struct.unpack('<h', bytes(data[4:6]))[0] / 16.0
                 # Convert to rad/s
-                return [np.radians(g) if g is not None else 0.0 for g in gyro]
+                return [np.radians(x), np.radians(y), np.radians(z)]
+            except Exception as e:
+                self.get_logger().debug(f'Failed to read gyroscope: {e}')
         return [0.0, 0.0, 0.0]
     
     def read_magnetometer(self):
         """Read magnetic field in microTesla."""
-        if ADAFRUIT_AVAILABLE and hasattr(self, 'sensor'):
-            mag = self.sensor.magnetic
-            if mag:
-                return [m if m is not None else 0.0 for m in mag]
+        if SMBUS_AVAILABLE and hasattr(self, 'bus'):
+            try:
+                # Read 6 bytes starting from MAG_DATA_X_LSB (0x0E)
+                data = self.bus.read_i2c_block_data(self.i2c_address, 0x0E, 6)
+                # Convert to microTesla (16 LSB = 1 microTesla)
+                x = struct.unpack('<h', bytes(data[0:2]))[0] / 16.0
+                y = struct.unpack('<h', bytes(data[2:4]))[0] / 16.0
+                z = struct.unpack('<h', bytes(data[4:6]))[0] / 16.0
+                return [x, y, z]
+            except Exception as e:
+                self.get_logger().debug(f'Failed to read magnetometer: {e}')
         return [0.0, 0.0, 0.0]
     
     def read_temperature(self):
         """Read temperature in Celsius."""
-        if ADAFRUIT_AVAILABLE and hasattr(self, 'sensor'):
-            temp = self.sensor.temperature
-            if temp is not None:
-                return float(temp)
+        if SMBUS_AVAILABLE and hasattr(self, 'bus'):
+            try:
+                # Read temperature byte
+                temp = self.bus.read_byte_data(self.i2c_address, self.TEMP)
+                return float(temp)  # Already in Celsius
+            except Exception as e:
+                self.get_logger().debug(f'Failed to read temperature: {e}')
         return 25.0
     
     def read_calibration_status(self):
         """Read calibration status (sys, gyro, accel, mag) 0-3."""
-        if ADAFRUIT_AVAILABLE and hasattr(self, 'sensor'):
-            calib = self.sensor.calibration_status
-            if calib:
-                return calib
+        if SMBUS_AVAILABLE and hasattr(self, 'bus'):
+            try:
+                # Read calibration status byte
+                calib = self.bus.read_byte_data(self.i2c_address, self.CALIB_STAT)
+                # Extract individual calibration levels (2 bits each)
+                sys_calib = (calib >> 6) & 0x03
+                gyro_calib = (calib >> 4) & 0x03
+                accel_calib = (calib >> 2) & 0x03
+                mag_calib = calib & 0x03
+                return [sys_calib, gyro_calib, accel_calib, mag_calib]
+            except Exception as e:
+                self.get_logger().debug(f'Failed to read calibration: {e}')
         return [0, 0, 0, 0]
     
     def save_calibration(self, filename):
         """Save calibration data to file."""
-        if ADAFRUIT_AVAILABLE and hasattr(self, 'sensor'):
-            calib_data = self.sensor.calibration
-            with open(filename, 'wb') as f:
-                f.write(bytearray(calib_data))
-            self.get_logger().info(f'Calibration saved to {filename}')
-    
+        if SMBUS_AVAILABLE and hasattr(self, 'bus'):
+            try:
+                # Read calibration data (22 bytes starting at 0x55)
+                calib_data = self.bus.read_i2c_block_data(self.i2c_address, 0x55, 22)
+                with open(filename, 'wb') as f:
+                    f.write(bytearray(calib_data))
+                self.get_logger().info(f'Calibration saved to {filename}')
+            except Exception as e:
+                self.get_logger().error(f'Failed to save calibration: {e}')
+
     def load_calibration(self, filename):
         """Load calibration data from file."""
         try:
             with open(filename, 'rb') as f:
                 calib_data = f.read()
-            if ADAFRUIT_AVAILABLE and hasattr(self, 'sensor'):
-                self.sensor.calibration = calib_data
+            if SMBUS_AVAILABLE and hasattr(self, 'bus') and len(calib_data) == 22:
+                # Switch to config mode
+                self.bus.write_byte_data(self.i2c_address, 0x3D, self.OPERATION_MODE_CONFIG)
+                time.sleep(0.02)
+                # Write calibration data
+                for i, byte in enumerate(calib_data):
+                    self.bus.write_byte_data(self.i2c_address, 0x55 + i, byte)
+                # Switch back to NDOF mode
+                self.bus.write_byte_data(self.i2c_address, 0x3D, self.OPERATION_MODE_NDOF)
+                time.sleep(0.02)
             self.get_logger().info(f'Calibration loaded from {filename}')
         except Exception as e:
             self.get_logger().warn(f'Failed to load calibration: {e}')
