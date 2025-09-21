@@ -31,6 +31,22 @@ install(PROGRAMS
   DESTINATION lib/${PROJECT_NAME}
 )
 
+# Create symlinks for executables without .py extension
+install(CODE "
+  execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink
+    star_tracker_node.py
+    \${CMAKE_INSTALL_PREFIX}/lib/${PROJECT_NAME}/star_tracker_node)
+  execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink
+    gps_interface.py
+    \${CMAKE_INSTALL_PREFIX}/lib/${PROJECT_NAME}/gps_interface)
+  execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink
+    bno055_interface.py
+    \${CMAKE_INSTALL_PREFIX}/lib/${PROJECT_NAME}/bno055_interface)
+  execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink
+    alignment_calibration.py
+    \${CMAKE_INSTALL_PREFIX}/lib/${PROJECT_NAME}/alignment_calibration)
+")
+
 # Install launch files
 install(DIRECTORY
   launch

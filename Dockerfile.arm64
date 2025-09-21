@@ -64,7 +64,7 @@ RUN pip3 install --upgrade pip && \
 WORKDIR /ros2_ws
 
 # Copy the packages
-COPY so_100_arm /ros2_ws/src/so_100_arm
+COPY . /ros2_ws/src/so_100_arm
 COPY star_tracker /ros2_ws/src/star_tracker
 
 # Clone hardware interface package (if needed for physical robot)
@@ -81,7 +81,7 @@ RUN /bin/bash -c "source /opt/ros/humble/setup.bash && \
 
 # Build the workspace
 RUN /bin/bash -c "source /opt/ros/humble/setup.bash && \
-    colcon build --packages-select so_arm_100_hardware so_100_arm star_tracker --symlink-install"
+    colcon build --packages-select so_arm_100_hardware so_100_arm star_tracker"
 
 # Copy config files
 COPY config /ros2_ws/config
