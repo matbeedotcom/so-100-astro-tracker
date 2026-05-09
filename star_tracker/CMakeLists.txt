@@ -28,6 +28,8 @@ install(PROGRAMS
   star_tracker/test_astropy_validation.py
   star_tracker/validate_ros2.py
   star_tracker/validate_tests.py
+  star_tracker/coordinate_transform.py
+  star_tracker/auto_calibration.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

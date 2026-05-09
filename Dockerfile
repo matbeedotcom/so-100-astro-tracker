@@ -46,6 +46,7 @@ RUN pip3 install \
     opencv-python \
     scipy \
     pyserial \
+    smbus2 \
     adafruit-circuitpython-bno055 \
     picamera2 || true
 

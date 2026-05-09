@@ -8,15 +8,42 @@ This repository contains ROS2 Humble packages for the SO-100 robot arm (5-DOF co
 
 ## Build and Run Commands
 
+### Docker Setup (Primary)
+```bash
+# Start the Docker environment
+docker-compose up -d so100-arm
+
+# Access the container
+docker-compose exec so100-arm bash
+
+# For multi-architecture builds (ARM64 support)
+./build_multiarch.sh
+```
+
 ### Build packages
 ```bash
 cd ~/ros2_ws
 # Build all SO-100 packages
-colcon build --packages-select so_100_arm star_tracker
+colcon build --packages-select so_100_arm star_tracker so_arm_100_hardware
 # Or build individually
 colcon build --packages-select so_100_arm
 colcon build --packages-select star_tracker
 source install/setup.bash
+```
+
+### Testing
+```bash
+# Run comprehensive test suite (Docker)
+./run_tests.sh
+
+# Individual test categories
+./run_tests.sh astropy      # Astronomical calculations
+./run_tests.sh ros2         # ROS2 compatibility
+./run_tests.sh gps          # GPS simulation
+./run_tests.sh integration  # Full integration tests
+
+# Quick validation
+./quick_test.sh
 ```
 
 ### Launch Commands
@@ -93,6 +120,43 @@ ros2 action send_goal /so_100_arm_controller/follow_joint_trajectory control_msg
     points: [{positions: [0.0, 0.0, 0.0, 0.0, 0.0], time_from_start: {sec: 2}}]
   }
 }"
+```
+
+### Star Tracker with IMU Commands
+
+**Test BNO055 IMU:**
+```bash
+# Check I2C connection
+i2cdetect -y 1  # Should show 0x28 or 0x29
+
+# Direct IMU test
+python3 /ros2_ws/test_bno055_direct.py
+
+# ROS2 IMU publisher
+python3 /ros2_ws/test_bno055_ros.py
+```
+
+**Calibrate IMU orientation:**
+```bash
+# Start IMU publisher
+python3 /ros2_ws/test_bno055_ros.py
+
+# In another terminal, run calibration
+python3 /ros2_ws/calibrate_imu_pointing.py
+# Follow prompts: 'h' for horizon, 'z' for zenith, 'c' to calculate
+```
+
+**Run star tracker with calibrated IMU:**
+```bash
+# GoTo mode with IMU feedback
+ros2 run star_tracker star_tracker_node --ros-args \
+  -p use_gps:=false \
+  -p use_imu:=true \
+  -p goto_mode:=true \
+  -p update_rate:=2.0
+
+# Monitor tracking
+ros2 topic echo /so_100_arm_controller/joint_trajectory
 ```
 
 ## Architecture
@@ -181,9 +245,23 @@ ros2 action send_goal /so_100_arm_controller/follow_joint_trajectory control_msg
   - Publishes to `/so_100_arm_controller/joint_trajectory` for movement commands
   - Uses FollowJointTrajectory action client for trajectory execution
   - Converts altitude/azimuth celestial coordinates to joint angles
+- **gps_provider.py**: GPS interface using pyserial for Adafruit Ultimate GPS v3
+- **imu_provider.py**: BNO055 9-DOF IMU interface via I2C/SMBus
 - **Coordinate Conversion**: Simple mapping where shoulder rotation controls azimuth and shoulder pitch controls altitude
 - **Supported Targets**: sun, moon, polaris, sirius (extensible)
 - **Update Rate**: Configurable tracking frequency (default: 1 Hz)
+
+### Raspberry Pi 5 Deployment
+```bash
+# Deploy to Pi 5
+./deploy_to_pi5.sh
+
+# Initial setup on Pi 5
+./setup_pi5.sh
+
+# Transfer Docker image
+./transfer_image_to_pi.sh
+```
 
 ### Common Issues
 - USB permissions: Run `sudo chmod 666 /dev/ttyUSB0` before hardware launch
@@ -191,3 +269,5 @@ ros2 action send_goal /so_100_arm_controller/follow_joint_trajectory control_msg
 - MoveIt2 integration is functional but collision checking may need tuning
 - Star tracker requires observer location (lat/lon/alt) for accurate tracking
 - Without astropy installed, star tracker uses simplified calculations for testing
+- For GPS on Raspberry Pi: Use `/dev/ttyAMA0` for UART connection
+- For IMU on Raspberry Pi: Enable I2C and check address with `i2cdetect -y 1`

@@ -58,6 +58,8 @@ RUN pip3 install --upgrade pip && \
         adafruit-circuitpython-bno055 \
         sysv_ipc \
         python3-ament-package \
+        pyserial \
+        smbus2 \
     || echo "Some packages may not be available for ARM64"
 
 # Create workspace

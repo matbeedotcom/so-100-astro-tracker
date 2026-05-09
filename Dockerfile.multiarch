@@ -57,6 +57,7 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
     ros-humble-xacro \
     ros-humble-robot-state-publisher \
     ros-humble-tf2-ros \
+    ros-humble-rmw-cyclonedds-cpp \
     && rm -rf /var/lib/apt/lists/*; \
     else \
     # AMD64: Install full MoveIt2 suite (already has desktop-full)
@@ -79,6 +80,7 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
     ros-humble-robot-state-publisher \
     ros-humble-rviz2 \
     ros-humble-tf2-ros \
+    ros-humble-rmw-cyclonedds-cpp \
     && rm -rf /var/lib/apt/lists/*; \
     fi
 
@@ -91,6 +93,7 @@ RUN pip3 install --no-cache-dir \
     opencv-python \
     scipy \
     pyserial \
+    smbus2 \
     adafruit-circuitpython-bno055 \
     || true
 

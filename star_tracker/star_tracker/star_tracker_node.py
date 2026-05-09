@@ -3,7 +3,7 @@
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist, Vector3
-from sensor_msgs.msg import JointState, Imu, NavSatFix, TimeReference
+from sensor_msgs.msg import JointState, Imu, NavSatFix, TimeReference, MagneticField
 from std_msgs.msg import String, Bool, Float64
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from control_msgs.action import FollowJointTrajectory
@@ -12,6 +12,16 @@ import numpy as np
 from datetime import datetime, timezone
 import os
 import json
+try:
+    from .coordinate_transform import CoordinateTransform
+    from .auto_calibration import AutoCalibration
+except ImportError:
+    # Fallback for direct execution
+    import sys
+    import os
+    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+    from coordinate_transform import CoordinateTransform
+    from auto_calibration import AutoCalibration
 
 # Import astronomical libraries
 try:
@@ -41,6 +51,7 @@ class StarTrackerNode(Node):
         self.declare_parameter('goto_mode', False)
         self.declare_parameter('alignment_file', 'star_alignment.json')
         self.declare_parameter('gps_timeout', 30.0)  # Seconds to wait for GPS fix
+        self.declare_parameter('imu_config_file', 'config/imu_calibration.yaml')  # IMU calibration config
         
         # Get parameters
         self.update_rate = self.get_parameter('update_rate').value
@@ -54,6 +65,11 @@ class StarTrackerNode(Node):
         self.goto_mode = self.get_parameter('goto_mode').value
         self.alignment_file = self.get_parameter('alignment_file').value
         self.gps_timeout = self.get_parameter('gps_timeout').value
+        self.imu_config_file = self.get_parameter('imu_config_file').value
+
+        # Debug parameter values
+        print(f"DEBUG: use_imu={self.use_imu}, goto_mode={self.goto_mode}")
+        print(f"DEBUG: target_object parameter = '{self.target}'")
         
         # Current location (will be updated by GPS if available)
         self.lat = self.fallback_lat
@@ -122,6 +138,12 @@ class StarTrackerNode(Node):
             self.euler_sub = self.create_subscription(
                 Vector3, 'imu/euler', self.euler_callback, 10
             )
+            # Subscribe to magnetometer data for auto-calibration
+            # Note: BNO055 interface publishes /imu/mag as MagneticField message
+            # Accelerometer data is available in the /imu/data Imu message
+            self.mag_sub = self.create_subscription(
+                MagneticField, 'imu/mag', self.magnetometer_callback, 10
+            )
             self.alignment_status_sub = self.create_subscription(
                 Bool, 'alignment/is_aligned', self.alignment_status_callback, 10
             )
@@ -131,12 +153,42 @@ class StarTrackerNode(Node):
         self.target_alt_az = (0.0, 0.0)  # altitude, azimuth in radians
         self.current_imu_orientation = None
         self.current_euler = None
+        self.current_imu_accel = None
+        self.current_imu_mag = None
         self.is_aligned = False
-        self.alignment_transform = None
-        
-        # Load alignment if in GoTo mode
-        if self.goto_mode:
-            self.load_alignment()
+        self.auto_calibration_done = False
+
+        # Initialize automatic calibration system
+        self.auto_calibration = AutoCalibration()
+
+        # Set magnetic declination for your location (look up online for your lat/lon)
+        # Default to 0 - user can set this via parameter if needed
+        self.declare_parameter('magnetic_declination', 0.0)
+        mag_declination = self.get_parameter('magnetic_declination').value
+        self.auto_calibration.set_magnetic_declination(mag_declination)
+
+        # Try to load existing auto-calibration
+        auto_calib_file = os.path.expanduser('~/auto_calibration.json')
+        if os.path.exists(auto_calib_file):
+            if self.auto_calibration.load_calibration(auto_calib_file):
+                self.get_logger().info('Loaded automatic calibration')
+                self.is_aligned = True
+            else:
+                self.get_logger().warn('Failed to load automatic calibration')
+        else:
+            self.get_logger().info('No automatic calibration found - will auto-calibrate on first IMU data')
+
+        # Keep coordinate transformer for fallback
+        self.coordinate_transform = CoordinateTransform()
+
+        # Setup automatic calibration
+        if self.use_imu:
+            self.get_logger().info('IMU enabled - automatic calibration will run when IMU data is received')
+            if self.auto_calibration.is_calibrated:
+                self.is_aligned = True
+                self.get_logger().info('Using existing automatic calibration')
+        else:
+            self.get_logger().info('IMU disabled - using coordinate-only mode')
         
         # Timer for tracking updates
         self.timer = self.create_timer(1.0 / self.update_rate, self.tracking_callback)
@@ -148,6 +200,8 @@ class StarTrackerNode(Node):
             self.get_logger().info(f'GPS integration enabled - waiting for fix...')
         if self.use_imu:
             self.get_logger().info(f'IMU integration enabled - GoTo mode: {self.goto_mode}')
+            self.get_logger().info(f'use_imu parameter: {self.use_imu}')
+            self.get_logger().info(f'imu_config_file parameter: {self.imu_config_file}')
     
     def joint_state_callback(self, msg):
         """Update current joint positions from joint states."""
@@ -196,12 +250,62 @@ class StarTrackerNode(Node):
             self.get_logger().warn('GPS fix lost - using last known position')
     
     def imu_callback(self, msg):
-        """Store current IMU orientation for GoTo calculations."""
+        """Store current IMU orientation and accelerometer data for GoTo calculations."""
         self.current_imu_orientation = msg.orientation
+        # Extract accelerometer data for auto-calibration
+        self.current_imu_accel = np.array([
+            msg.linear_acceleration.x,
+            msg.linear_acceleration.y,
+            msg.linear_acceleration.z
+        ])
     
     def euler_callback(self, msg):
-        """Store current Euler angles from IMU."""
+        """Store current Euler angles from IMU.
+        BNO055 publishes as: x=heading/yaw, y=roll, z=pitch
+        """
         self.current_euler = np.array([msg.x, msg.y, msg.z])
+
+        # Perform automatic calibration if not done yet
+        self.try_auto_calibration()
+
+    def magnetometer_callback(self, msg):
+        """Store current magnetometer reading from MagneticField message."""
+        self.current_imu_mag = np.array([
+            msg.magnetic_field.x,
+            msg.magnetic_field.y,
+            msg.magnetic_field.z
+        ])
+
+    def try_auto_calibration(self):
+        """Attempt automatic calibration if all IMU data is available."""
+        if (self.auto_calibration_done or
+            self.current_euler is None or
+            self.current_imu_accel is None or
+            self.current_imu_mag is None):
+            return
+
+        try:
+            # Perform automatic calibration using current IMU data
+            success = self.auto_calibration.calibrate_from_imu_data(
+                self.current_euler,
+                self.current_imu_accel,
+                self.current_imu_mag
+            )
+
+            if success:
+                self.auto_calibration_done = True
+                self.is_aligned = True
+                self.get_logger().info('Automatic IMU calibration completed!')
+
+                # Save calibration for future use
+                auto_calib_file = os.path.expanduser('~/auto_calibration.json')
+                self.auto_calibration.save_calibration(auto_calib_file)
+                self.get_logger().info(f'Auto-calibration saved to {auto_calib_file}')
+
+                print(f"DEBUG: After auto-calibration, self.target = '{self.target}'")
+
+        except Exception as e:
+            self.get_logger().error(f'Auto-calibration failed: {e}')
     
     def alignment_status_callback(self, msg):
         """Update alignment status from calibration node."""
@@ -270,11 +374,17 @@ class StarTrackerNode(Node):
                 current_time = datetime.utcnow()
             
             hour_angle = (current_time.hour + current_time.minute/60.0) * 15.0
-            
+
+            print(f"DEBUG: calculate_target_position() called with self.target = '{self.target}'")
+
             if self.target == 'polaris':
                 # Polaris is approximately at celestial north pole
                 alt = np.radians(self.lat)  # Altitude equals latitude
                 az = 0.0  # North
+            elif self.target == 'zenith':
+                # Zenith: straight up (90° altitude, any azimuth)
+                alt = np.radians(90.0)  # Straight up
+                az = 0.0  # Point north for consistency
             else:
                 # Simple sun approximation
                 alt = np.radians(45.0)  # Fixed altitude for testing
@@ -301,6 +411,10 @@ class StarTrackerNode(Node):
         elif self.target == 'sirius':
             # Sirius coordinates
             obj_coord = coord.SkyCoord(ra='06h45m09s', dec='-16d42m58s')
+        elif self.target == 'zenith':
+            # Zenith: straight up (90° altitude, any azimuth)
+            # Skip astropy transformation, return directly
+            return np.radians(90.0), 0.0
         else:
             self.get_logger().warn(f'Unknown target: {self.target}')
             return None, None
@@ -316,34 +430,8 @@ class StarTrackerNode(Node):
         return obj_altaz.alt.rad, obj_altaz.az.rad
     
     def altaz_to_joint_angles(self, alt, az):
-        """Convert altitude/azimuth to robot joint angles."""
-        # This is a simplified mapping - adjust based on your robot's kinematics
-        # and mounting orientation
-        
-        # Shoulder rotation controls azimuth
-        shoulder_rotation = az
-        
-        # Shoulder pitch and elbow control altitude
-        # Simple approach: use shoulder pitch primarily
-        shoulder_pitch = alt - np.pi/2  # Adjust for robot's zero position
-        
-        # Keep elbow straight for now
-        elbow = 0.0
-        
-        # Wrist angles to keep camera level
-        wrist_pitch = -shoulder_pitch  # Compensate for shoulder pitch
-        wrist_roll = 0.0
-        
-        # Clamp to joint limits
-        joint_positions = [
-            np.clip(shoulder_rotation, -np.pi, np.pi),
-            np.clip(shoulder_pitch, -np.pi, np.pi),
-            np.clip(elbow, -np.pi, np.pi),
-            np.clip(wrist_pitch, -np.pi, np.pi),
-            np.clip(wrist_roll, -np.pi, np.pi)
-        ]
-        
-        return joint_positions
+        """Convert altitude/azimuth to robot joint angles using coordinate transformer."""
+        return self.coordinate_transform.altaz_to_joint_positions(alt, az)
     
     def send_trajectory(self, target_positions, duration=2.0):
         """Send joint trajectory command to robot."""
@@ -369,43 +457,75 @@ class StarTrackerNode(Node):
             self.trajectory_client.send_goal_async(goal)
     
     def get_current_pointing(self):
-        """Get current telescope pointing from IMU data."""
+        """Get current telescope pointing from IMU data using automatic calibration."""
         if self.current_euler is None:
             return 0.0, 0.0
-        
-        if self.alignment_transform:
-            # Apply alignment transformation
-            current_alt, current_az = self.apply_alignment_transform(self.current_euler)
+
+        if self.use_imu:
+            # Use automatic calibration system (works immediately with IMU magnetometer/accelerometer)
+            current_alt, current_az = self.auto_calibration.imu_to_altaz(self.current_euler)
+
+            # Log pointing info occasionally for debugging
+            if hasattr(self, '_last_pointing_log'):
+                if (self.get_clock().now().nanoseconds - self._last_pointing_log) > 5e9:  # 5 seconds
+                    self.get_logger().info(f'Current pointing: Alt={np.degrees(current_alt):.1f}°, Az={np.degrees(current_az):.1f}°')
+                    self._last_pointing_log = self.get_clock().now().nanoseconds
+            else:
+                self._last_pointing_log = self.get_clock().now().nanoseconds
+
+            return current_alt, current_az
+
         else:
-            # Direct mapping (assumes IMU mounted with telescope)
-            # This is simplified - adjust based on actual mounting
-            current_az = self.current_euler[0]  # Yaw
-            current_alt = self.current_euler[2]  # Pitch
-        
-        return current_alt, current_az
+            # Fallback: direct mapping for initial operation
+            # BNO055 euler message convention: x=heading/yaw, y=roll, z=pitch
+            current_az = self.current_euler[0]   # x = heading/yaw for compass bearing
+            current_alt = self.current_euler[2]  # z = pitch for elevation
+
+            return current_alt, current_az
     
     def calculate_goto_trajectory(self, current_alt, current_az, target_alt, target_az):
         """Calculate joint positions for GoTo movement with IMU feedback."""
-        # Calculate required movement
-        delta_alt = target_alt - current_alt
-        delta_az = self.normalize_angle(target_az - current_az)
-        
-        # Get current joint positions
-        current_joints = list(self.current_joint_positions)
-        
-        # Apply corrections
-        # This assumes direct mapping - adjust based on robot kinematics
-        current_joints[0] += delta_az  # Shoulder rotation for azimuth
-        current_joints[1] += delta_alt  # Shoulder pitch for altitude
-        
-        # Ensure wrist compensation
-        current_joints[3] = -current_joints[1]  # Wrist pitch compensates shoulder
-        
-        # Clamp to limits
-        for i in range(len(current_joints)):
-            current_joints[i] = np.clip(current_joints[i], -np.pi, np.pi)
-        
-        return current_joints
+        # Calculate absolute joint positions needed to point at target
+        # This replaces the incremental approach with absolute positioning
+
+        # Convert target altitude/azimuth directly to joint angles
+        target_joint_positions = self.altaz_to_joint_angles(target_alt, target_az)
+
+        # Calculate error for logging
+        error_alt = target_alt - current_alt
+        error_az = self.normalize_angle(target_az - current_az)
+
+        # Apply proportional control to smooth movement
+        gain = 0.1  # Lower gain for stability - prevent oscillation
+
+        # Interpolate between current and target positions
+        current_joints = np.array(self.current_joint_positions)
+        target_joints = np.array(target_joint_positions)
+
+        # Calculate the difference and apply gain
+        joint_diff = target_joints - current_joints
+
+        # Normalize shoulder rotation difference to shortest path
+        joint_diff[0] = self.normalize_angle(joint_diff[0])
+
+        # Apply gain to difference
+        corrected_joints = current_joints + gain * joint_diff
+
+        # Clamp to joint limits
+        for i in range(len(corrected_joints)):
+            corrected_joints[i] = np.clip(corrected_joints[i], -np.pi, np.pi)
+
+        # Log joint positions for debugging
+        joint_names = ['Shoulder_Rotation', 'Shoulder_Pitch', 'Elbow', 'Wrist_Pitch', 'Wrist_Roll']
+        current_degrees = [np.degrees(j) for j in current_joints]
+        target_degrees = [np.degrees(j) for j in target_joints]
+        corrected_degrees = [np.degrees(j) for j in corrected_joints]
+
+        self.get_logger().info(f'Current joints: {joint_names[0]}={current_degrees[0]:.1f}° {joint_names[1]}={current_degrees[1]:.1f}°')
+        self.get_logger().info(f'Target joints:  {joint_names[0]}={target_degrees[0]:.1f}° {joint_names[1]}={target_degrees[1]:.1f}°')
+        self.get_logger().info(f'Moving to:      {joint_names[0]}={corrected_degrees[0]:.1f}° {joint_names[1]}={corrected_degrees[1]:.1f}°')
+
+        return corrected_joints.tolist()
     
     def normalize_angle(self, angle):
         """Normalize angle to [-pi, pi]."""
@@ -416,15 +536,19 @@ class StarTrackerNode(Node):
         return angle
     
     def apply_alignment_transform(self, euler_angles):
-        """Apply alignment transformation to IMU data."""
+        """Apply alignment transformation to IMU data.
+        Input: euler_angles[0]=heading/yaw, [1]=roll, [2]=pitch
+        Output: (altitude, azimuth) for telescope pointing
+        """
         if not self.alignment_transform:
-            return euler_angles[2], euler_angles[0]  # Default: pitch, yaw
-        
-        # Apply transformation matrix from alignment
-        # This would use the alignment matrix from calibration
+            # Default mapping: altitude=pitch, azimuth=heading
+            return euler_angles[2], euler_angles[0]
+
+        # Apply transformation matrix from alignment calibration
         transformed = self.alignment_transform @ euler_angles
-        
-        return transformed[0], transformed[1]
+
+        # Return altitude, azimuth
+        return transformed[2], transformed[0]
     
     def load_alignment(self):
         """Load alignment calibration for GoTo mode."""
@@ -460,11 +584,11 @@ def main(args=None):
     
     node = StarTrackerNode()
     
-    # Override parameters from environment
+    # Override location parameters from environment
     node.lat = lat
     node.lon = lon
     node.alt = alt
-    node.target = target
+    # Don't override target - use ROS parameter value
     
     try:
         rclpy.spin(node)

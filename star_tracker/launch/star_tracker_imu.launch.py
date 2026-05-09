@@ -90,7 +90,7 @@ def generate_launch_description():
             'target_object': LaunchConfiguration('target_object'),
             'use_imu': True,
             'goto_mode': LaunchConfiguration('goto_mode'),
-            'update_rate': 10.0,
+            'update_rate': 2.0,
             'alignment_file': 'star_alignment.json',
         }]
     )
